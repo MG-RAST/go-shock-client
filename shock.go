@@ -7,9 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	//"github.com/MG-RAST/AWE/lib/conf"
-	"github.com/MG-RAST/AWE/vendor/github.com/MG-RAST/golib/httpclient"
-	//"github.com/MG-RAST/AWE/lib/logger"
+	"github.com/MG-RAST/golib/httpclient"
 	"io"
 	"io/ioutil"
 	"net/http"
@@ -101,13 +99,15 @@ func (sc *ShockClient) Put_request(resource string, query url.Values, response i
 	return sc.Do_request("PUT", resource, query, response)
 }
 
-func (sc *ShockClient) Do_request(method string, resource string, query url.Values, response interface{}) (err error) {
 
+
+func (sc *ShockClient) Do_request_string(method string, resource string, query url.Values) (jsonstream []byte, err error) {
+	
 	//logger.Debug(1, fmt.Sprint("string_url: ", sc.Host))
 
 	myurl, err := url.ParseRequestURI(sc.Host)
 	if err != nil {
-		return err
+		return
 	}
 
 	(*myurl).Path = resource
@@ -121,7 +121,7 @@ func (sc *ShockClient) Do_request(method string, resource string, query url.Valu
 	}
 
 	if len(shockurl) < 5 {
-		return errors.New("could not parse shockurl: " + shockurl)
+		return jsonstream, errors.New("could not parse shockurl: " + shockurl)
 	}
 
 	var user *httpclient.Auth
@@ -139,7 +139,7 @@ func (sc *ShockClient) Do_request(method string, resource string, query url.Valu
 	}
 	defer res.Body.Close()
 
-	jsonstream, err := ioutil.ReadAll(res.Body)
+	jsonstream, err = ioutil.ReadAll(res.Body)
 
 	if sc.Debug {
 		fmt.Fprintf(os.Stdout, "json response:\n %s\n", string(jsonstream))
@@ -147,8 +147,16 @@ func (sc *ShockClient) Do_request(method string, resource string, query url.Valu
 
 	//logger.Debug(1, string(jsonstream))
 	if err != nil {
-		return err
+		return 
 	}
+	
+	return jsonstream, nil
+}
+
+func (sc *ShockClient) Do_request(method string, resource string, query url.Values, response interface{}) (err error) {
+
+
+	jsonstream, err := sc.Do_request_string(method, resource, query)
 
 	//response := new(result)
 	if err := json.Unmarshal(jsonstream, response); err != nil {
