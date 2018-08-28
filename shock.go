@@ -130,6 +130,11 @@ func (o *Opts) Value(key string) string {
 	return val
 }
 
+func NewShockClient(shock_url string, shock_auth string, debug bool) (sc *ShockClient) {
+	sc = &ShockClient{Host: shock_url, Token: shock_auth, Debug: debug}
+	return
+}
+
 // *** low-level functions ***
 
 func (sc *ShockClient) getRequest(resource string, query url.Values, response interface{}) (err error) {
