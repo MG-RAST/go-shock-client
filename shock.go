@@ -240,6 +240,9 @@ func (sc *ShockClient) CreateOrUpdate(opts Opts, nodeid string, nodeattr map[str
 			if opts.HasKey("file") { // upload_type: basic , file=...
 				form.AddFile("upload", opts.Value("file"))
 			}
+			if opts.HasKey("file_name") {
+				form.AddParam("file_name", opts.Value("file_name"))
+			}
 		case "parts":
 			if opts.HasKey("parts") {
 				form.AddParam("parts", opts.Value("parts"))
