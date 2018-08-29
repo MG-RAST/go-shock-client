@@ -32,7 +32,7 @@ type ShockClient struct {
 
 type ShockResponse struct {
 	Code int       `bson:"status" json:"status"`
-	Data ShockNode `bson:"data" json:"data"`
+	Data *ShockNode `bson:"data" json:"data"`
 	Errs []string  `bson:"error" json:"error"`
 }
 
@@ -145,10 +145,15 @@ func (sc *ShockClient) putRequest(resource string, query url.Values, response in
 	return sc.doRequest("PUT", resource, query, response)
 }
 
+func (sc *ShockClient) postRequest(resource string, query url.Values, response interface{}) (err error) {
+	return sc.doRequest("POST", resource, query, response)
+}
+
 func (sc *ShockClient) deleteRequest(resource string, query url.Values, response interface{}) (err error) {
 	return sc.doRequest("DELETE", resource, query, response)
 }
 
+// for GET / PUT / POST / DELETE with no multipart from
 func (sc *ShockClient) doRequestString(method string, resource string, query url.Values) (jsonstream []byte, err error) {
 	var myurl *url.URL
 	myurl, err = url.ParseRequestURI(sc.Host)
@@ -192,6 +197,7 @@ func (sc *ShockClient) doRequestString(method string, resource string, query url
 	return
 }
 
+// for GET / PUT / POST / DELETE with no multipart from
 func (sc *ShockClient) doRequest(method string, resource string, query url.Values, response interface{}) (err error) {
 	var jsonstream []byte
 	jsonstream, err = sc.doRequestString(method, resource, query)
@@ -202,10 +208,8 @@ func (sc *ShockClient) doRequest(method string, resource string, query url.Value
 	return
 }
 
-// *** high-level functions ***
-
-// for multipart form PUT / POST
-func (sc *ShockClient) CreateOrUpdate(opts Opts, nodeid string, nodeattr map[string]interface{}) (node *ShockNode, err error) {
+// for PUT / POST with multipart form
+func (sc *ShockClient) createOrUpdate(opts Opts, nodeid string, nodeattr map[string]interface{}) (node *ShockNode, err error) {
 	host := sc.Host
 	token := sc.Token
 
@@ -228,7 +232,7 @@ func (sc *ShockClient) CreateOrUpdate(opts Opts, nodeid string, nodeattr map[str
 	if len(nodeattr) != 0 {
 		nodeattr_json, jerr := json.Marshal(nodeattr)
 		if jerr != nil {
-			err = errors.New("(CreateOrUpdate) error marshalling NodeAttr")
+			err = errors.New("(createOrUpdate) error marshalling NodeAttr")
 			return
 		}
 		form.AddParam("attributes_str", string(nodeattr_json[:]))
@@ -252,7 +256,7 @@ func (sc *ShockClient) CreateOrUpdate(opts Opts, nodeid string, nodeattr map[str
 			if opts.HasKey("parts") {
 				form.AddParam("parts", opts.Value("parts"))
 			} else {
-				err = errors.New("(CreateOrUpdate) (case:parts) missing partial upload parameter: parts")
+				err = errors.New("(createOrUpdate) (case:parts) missing partial upload parameter: parts")
 				return
 			}
 			if opts.HasKey("file_name") {
@@ -262,14 +266,14 @@ func (sc *ShockClient) CreateOrUpdate(opts Opts, nodeid string, nodeattr map[str
 			if opts.HasKey("part") && opts.HasKey("file") {
 				form.AddFile(opts.Value("part"), opts.Value("file"))
 			} else {
-				err = errors.New("(CreateOrUpdate) (case:part) missing partial upload parameter: part or file")
+				err = errors.New("(createOrUpdate) (case:part) missing partial upload parameter: part or file")
 				return
 			}
 		case "remote_path":
 			if opts.HasKey("remote_path") {
 				form.AddParam("path", opts.Value("remote_path"))
 			} else {
-				err = errors.New("(CreateOrUpdate) (case:remote_path) missing remote path parameter: path")
+				err = errors.New("(createOrUpdate) (case:remote_path) missing remote path parameter: path")
 				return
 			}
 		case "virtual_file":
@@ -277,21 +281,14 @@ func (sc *ShockClient) CreateOrUpdate(opts Opts, nodeid string, nodeattr map[str
 				form.AddParam("type", "virtual")
 				form.AddParam("source", opts.Value("virtual_file"))
 			} else {
-				err = errors.New("(CreateOrUpdate) (case:virtual_file) missing virtual node parameter: source")
-				return
-			}
-		case "index":
-			if opts.HasKey("index_type") {
-				url += "/index/" + opts.Value("index_type")
-			} else {
-				err = errors.New("(CreateOrUpdate) (case:index) missing index type when creating index")
+				err = errors.New("(createOrUpdate) (case:virtual_file) missing virtual node parameter: source")
 				return
 			}
 		case "copy":
 			if opts.HasKey("parent_node") {
 				form.AddParam("copy_data", opts.Value("parent_node"))
 			} else {
-				err = errors.New("(CreateOrUpdate) (case:copy) missing copy node parameter: parent_node")
+				err = errors.New("(createOrUpdate) (case:copy) missing copy node parameter: parent_node")
 				return
 			}
 			if opts.HasKey("copy_indexes") {
@@ -303,7 +300,7 @@ func (sc *ShockClient) CreateOrUpdate(opts Opts, nodeid string, nodeattr map[str
 				form.AddParam("parent_index", opts.Value("parent_index"))
 				form.AddFile("subset_indices", opts.Value("file"))
 			} else {
-				err = errors.New("(CreateOrUpdate) (case:subset) missing subset node parameter: parent_node or parent_index or file")
+				err = errors.New("(createOrUpdate) (case:subset) missing subset node parameter: parent_node or parent_index or file")
 				return
 			}
 		}
@@ -335,27 +332,18 @@ func (sc *ShockClient) CreateOrUpdate(opts Opts, nodeid string, nodeattr map[str
 	jsonstream, _ := ioutil.ReadAll(res.Body)
 	response := new(ShockResponse)
 	if err = json.Unmarshal(jsonstream, response); err != nil {
-		err = fmt.Errorf("(CreateOrUpdate) (httpclient.Do) failed to marshal response:\"%s\"", jsonstream)
+		err = fmt.Errorf("(createOrUpdate) (httpclient.Do) failed to marshal response:\"%s\"", jsonstream)
 		return
 	}
 	if len(response.Errs) > 0 {
-		err = fmt.Errorf("(CreateOrUpdate) type=%s, method=%s, url=%s, error=%s", uploadType, method, url, strings.Join(response.Errs, ","))
+		err = fmt.Errorf("(createOrUpdate) type=%s, method=%s, url=%s, error=%s", uploadType, method, url, strings.Join(response.Errs, ","))
 		return
 	}
-	node = &response.Data
+	node = response.Data
 	return
 }
 
-func (sc *ShockClient) ShockPutIndex(nodeid string, indexname string) (err error) {
-	if indexname == "" {
-		return
-	}
-	opts := Opts{}
-	opts["upload_type"] = "index"
-	opts["index_type"] = indexname
-	_, err = sc.CreateOrUpdate(opts, nodeid, nil)
-	return
-}
+// *** high-level functions ***
 
 func (sc *ShockClient) WaitIndex(nodeid string, indexname string) (index IdxInfo, err error) {
 	if indexname == "" {
@@ -423,8 +411,8 @@ func (sc *ShockClient) WaitFile(nodeid string) (node *ShockNode, err error) {
 	return
 }
 
-// should return node id if you create new node (i.e. do not specify node id)
-func (sc *ShockClient) PutFileToShock(filename string, nodeid string, rank int, attrfile string, ntype string, formopts map[string]string, nodeattr map[string]interface{}) (newNodeid string, err error) {
+// upload file to node, creates new node if no nodeid given, handle different node types
+func (sc *ShockClient) PutOrPostFile(filename string, nodeid string, rank int, attrfile string, ntype string, formopts map[string]string, nodeattr map[string]interface{}) (newNodeid string, err error) {
 	opts := Opts{}
 	fi, _ := os.Stat(filename)
 	
@@ -450,7 +438,7 @@ func (sc *ShockClient) PutFileToShock(filename string, nodeid string, rank int, 
 	}
 
 	var node *ShockNode
-	node, err = sc.CreateOrUpdate(opts, nodeid, nodeattr)
+	node, err = sc.createOrUpdate(opts, nodeid, nodeattr)
 	if err != nil {
 		err = fmt.Errorf("(PutFileToShock) failed (%s): %v", sc.Host, err)
 		return
@@ -461,30 +449,122 @@ func (sc *ShockClient) PutFileToShock(filename string, nodeid string, rank int, 
 	return
 }
 
-func (sc *ShockClient) PostNodeWithToken(filename string, numParts int) (nodeid string, err error) {
-	opts := Opts{}
-	var node *ShockNode
+// create basic node with file POST
+func (sc *ShockClient) PostFile(filename string) (nodeid string, err error) {
+    nodeid, err = sc.PutOrPostFile(filename, "", 0, "", "", nil, nil)
+    return
+}
 
-    // create empty node
-	node, err = sc.CreateOrUpdate(opts, "", nil)
-	if err != nil {
-		err = fmt.Errorf("(PostNodeWithToken) failed (%s): %v", sc.Host, err)
-		return
-	}
-	if node != nil {
-		nodeid = node.Id
+// create empty node, basic or parts
+func (sc *ShockClient) CreateNode(filename string, numParts int) (nodeid string, err error) {
+	sr := new(ShockResponse)
+	err = sc.postRequest("/node", nil, &sr)
+    if err != nil {
+        err = fmt.Errorf("(CreateNode) %s", err.Error())
+        return
+    }
+    
+    if len(sr.Errs) > 0 {
+        err = fmt.Errorf("(CreateNode) %s", strings.Join(sr.Errs, ","))
+        return
+    }
+	if sr.Data != nil {
+		nodeid = sr.Data.Id
 	}
     
 	// create "parts" for output splits
 	if numParts > 1 {
-		opts["upload_type"] = "parts"
-		opts["file_name"] = filename
-		opts["parts"] = strconv.Itoa(numParts)
-		_, err = sc.CreateOrUpdate(opts, node.Id, nil)
+        opts := Opts{"upload_type": "parts", "file_name": filename, "parts": strconv.Itoa(numParts)}
+		_, err = sc.createOrUpdate(opts, nodeid, nil)
 		if err != nil {
-			err = fmt.Errorf("(PostNodeWithToken) failed (%s, %s): %v", sc.Host, node.Id, err)
+			err = fmt.Errorf("(CreateNode) node=%s: %s", nodeid, err.Error())
 		}
 	}
+	return
+}
+
+func (sc *ShockClient) PutIndex(nodeid string, indexname string) (err error) {
+	if indexname == "" {
+		return
+	}
+	sr := new(ShockResponseGeneric)
+	err = sc.putRequest("/node/"+nodeid+"/index/"+indexname, nil, &sr)
+    if err != nil {
+        err = fmt.Errorf("(PutIndex) node=%s, index=%s: %s", nodeid, indexname, err.Error())
+        return
+    }
+    
+    if len(sr.Errs) > 0 {
+        err = fmt.Errorf("(PutIndex) node=%s, index=%s: %s", nodeid, indexname, strings.Join(sr.Errs, ","))
+    }
+	return
+}
+
+func (sc *ShockClient) PutAcl(nodeid string, acltype string, username string) (err error) {
+    if (acltype == "") || (username == "") {
+        return
+    }
+    var query url.Values
+    query.Add("users", username)
+    
+	sr := new(ShockResponseGeneric)
+	err = sc.putRequest("/node/"+nodeid+"/acl/"+acltype, query, &sr)
+    if err != nil {
+        err = fmt.Errorf("(PutAcl) node=%s, acl=%s, user=%s: %s", nodeid, acltype, username, err.Error())
+        return
+    }
+    
+    if len(sr.Errs) > 0 {
+        err = fmt.Errorf("(PutAcl) node=%s, acl=%s, user=%s: %s", nodeid, acltype, username, strings.Join(sr.Errs, ","))
+    }
+	return
+}
+
+func (sc *ShockClient) DeleteAcl(nodeid string, acltype string, username string) (err error) {
+    if (acltype == "") || (username == "") {
+        return
+    }
+    var query url.Values
+    query.Add("users", username)
+    
+	sr := new(ShockResponseGeneric)
+	err = sc.deleteRequest("/node/"+nodeid+"/acl/"+acltype, query, &sr)
+    if err != nil {
+        err = fmt.Errorf("(DeleteAcl) node=%s, acl=%s, user=%s: %s", nodeid, acltype, username, err.Error())
+        return
+    }
+    
+    if len(sr.Errs) > 0 {
+        err = fmt.Errorf("(DeleteAcl) node=%s, acl=%s, user=%s: %s", nodeid, acltype, username, strings.Join(sr.Errs, ","))
+    }
+	return
+}
+
+func (sc *ShockClient) GetAcl(nodeid string) (sr *ShockResponseGeneric, err error) {
+	sr = new(ShockResponseGeneric)
+	err = sc.getRequest("/node/"+nodeid+"/acl", nil, &sr)
+    if err != nil {
+        err = fmt.Errorf("(GetAcl) node=%s: %s", nodeid, err.Error())
+        return
+    }
+    
+    if len(sr.Errs) > 0 {
+        err = fmt.Errorf("(GetAcl) node=%s: %s", nodeid, strings.Join(sr.Errs, ","))
+    }
+	return
+}
+
+func (sc *ShockClient) MakePublic(nodeid string) (err error) {
+	sr := new(ShockResponseGeneric)
+	err = sc.putRequest("/node/"+nodeid+"/acl/public_read", nil, &sr)
+    if err != nil {
+        err = fmt.Errorf("(MakePublic) node=%s: %s", nodeid, err.Error())
+        return
+    }
+    
+    if len(sr.Errs) > 0 {
+        err = fmt.Errorf("(MakePublic) node=%s: %s", nodeid, strings.Join(sr.Errs, ","))
+    }
 	return
 }
 
@@ -500,16 +580,17 @@ func (sc *ShockClient) GetNodeDownloadUrl(node ShockNode) (downloadUrl string, e
 	return
 }
 
-func (sc *ShockClient) MakePublic(nodeid string) (sr *ShockResponseGeneric, err error) {
-	sr = new(ShockResponseGeneric)
-	err = sc.putRequest("/node/"+nodeid+"/acl/public_read", nil, &sr)
-	return
-}
-
 func (sc *ShockClient) Query(query url.Values) (sr *ShockQueryResponse, err error) {
 	query.Add("query", "")
 	sr = new(ShockQueryResponse)
 	err = sc.getRequest("/node/", query, &sr)
+    if err != nil {
+        err = fmt.Errorf("(Query) %s", err.Error())
+        return
+    }
+    if len(sr.Errs) > 0 {
+        err = fmt.Errorf("(Query) %s", strings.Join(sr.Errs, ","))
+    }
 	return
 }
 
@@ -521,6 +602,7 @@ func (sc *ShockClient) QueryPaginated(resource string, query url.Values, limit i
 	var myurl *url.URL
 	myurl, err = url.ParseRequestURI(sc.Host)
 	if err != nil {
+        err = fmt.Errorf("(QueryPaginated) %s", err.Error())
 		return
 	}
 	(*myurl).Path = resource
@@ -542,6 +624,7 @@ func (sc *ShockClient) GetNode(nodeid string) (node *ShockNode, err error) {
 	sr := new(ShockResponse)
 	err = sc.getRequest("/node/"+nodeid, nil, &sr)
     if err != nil {
+        err = fmt.Errorf("(GetNode) node=%s: %s", nodeid, err.Error())
         return
     }
     
@@ -550,7 +633,7 @@ func (sc *ShockClient) GetNode(nodeid string) (node *ShockNode, err error) {
         return
     }
     
-    node = &sr.Data
+    node = sr.Data
     if node == nil {
         err = fmt.Errorf("(GetNode) node=%s: empty node returned from Shock", nodeid)
     }
@@ -558,15 +641,15 @@ func (sc *ShockClient) GetNode(nodeid string) (node *ShockNode, err error) {
 }
 
 func (sc *ShockClient) DeleteNode(nodeid string) (err error) {
-	sr := new(ShockResponse)
+	sr := new(ShockResponseGeneric)
 	err = sc.deleteRequest("/node"+nodeid, nil, &sr)
     if err != nil {
+        err = fmt.Errorf("(DeleteNode) node=%s: %s", nodeid, err.Error())
         return
     }
     
     if len(sr.Errs) > 0 {
         err = fmt.Errorf("(DeleteNode) node=%s: %s", nodeid, strings.Join(sr.Errs, ","))
-        return
     }
 	return
 }
