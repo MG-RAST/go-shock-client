@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -225,10 +226,11 @@ func (sc *ShockClient) CreateOrUpdate(opts Opts, nodeid string, nodeattr map[str
 		method = "PUT"
 	}
 	form := httpclient.NewForm()
+
+	// attributes
 	if opts.HasKey("attributes") {
 		form.AddFile("attributes", opts.Value("attributes"))
 	}
-
 	if len(nodeattr) != 0 {
 		var nodeattr_json []byte
 		nodeattr_json, err = json.Marshal(nodeattr)
@@ -237,6 +239,14 @@ func (sc *ShockClient) CreateOrUpdate(opts Opts, nodeid string, nodeattr map[str
 			return
 		}
 		form.AddParam("attributes_str", string(nodeattr_json[:]))
+	}
+
+	// expiration
+	if opts.HasKey("expiration") {
+		form.AddParam("expiration", opts.Value("expiration"))
+	}
+	if opts.HasKey("remove_expiration") {
+		form.AddParam("remove_expiration", "1")
 	}
 
 	var uploadType string
@@ -429,6 +439,7 @@ func (sc *ShockClient) PutOrPostFile(filename string, nodeid string, rank int, a
 	}
 	if filename != "" {
 		opts["file"] = filename
+		opts["file_name"] = path.Base(filename)
 	}
 	if rank == 0 {
 		opts["upload_type"] = "basic"
@@ -458,8 +469,17 @@ func (sc *ShockClient) PutOrPostFile(filename string, nodeid string, rank int, a
 }
 
 // create basic node with file POST
-func (sc *ShockClient) PostFile(filename string) (nodeid string, err error) {
-	nodeid, err = sc.PutOrPostFile(filename, "", 0, "", "", nil, nil)
+func (sc *ShockClient) PostFile(filepath string, filename string) (nodeid string, err error) {
+	opts := Opts{"upload_type": "basic", "file": filepath}
+	if filename != "" {
+		opts["file_name"] = filename
+	}
+
+	var node *ShockNode
+	node, err = sc.createOrUpdate(opts, "", nil)
+	if node != nil {
+		nodeid = node.Id
+	}
 	return
 }
 
@@ -482,12 +502,43 @@ func (sc *ShockClient) CreateNode(filename string, numParts int) (nodeid string,
 
 	// create "parts" for output splits
 	if numParts > 1 {
-		opts := Opts{"upload_type": "parts", "file_name": filename, "parts": strconv.Itoa(numParts)}
-		_, err = sc.CreateOrUpdate(opts, nodeid, nil)
+		opts := Opts{"upload_type": "parts", "file_name": path.Base(filename), "parts": strconv.Itoa(numParts)}
+		_, err = sc.createOrUpdate(opts, nodeid, nil)
 		if err != nil {
 			err = fmt.Errorf("(CreateNode) node=%s: %s", nodeid, err.Error())
 		}
 	}
+	return
+}
+
+// update node attributes
+func (sc *ShockClient) UpdateAttributes(nodeid string, attrfile string, nodeattr map[string]interface{}) (err error) {
+	opts := Opts{}
+	if attrfile != "" {
+		opts["attributes"] = attrfile
+	}
+	_, err = sc.createOrUpdate(opts, nodeid, nodeattr)
+	return
+}
+
+// change node filename
+func (sc *ShockClient) UpdateFilename(nodeid string, filename string) (err error) {
+	opts := Opts{"upload_type": "basic", "file_name": filename}
+	_, err = sc.createOrUpdate(opts, nodeid, nil)
+	return
+}
+
+// add / modify / delete expiration
+func (sc *ShockClient) Expiration(nodeid string, value int, format byte) (err error) {
+	opts := Opts{}
+	if value == 0 {
+		opts["remove_expiration"] = ""
+	} else if value > 0 {
+		opts["expiration"] = strconv.Itoa(value) + string(format)
+	} else {
+		return
+	}
+	_, err = sc.createOrUpdate(opts, nodeid, nil)
 	return
 }
 
