@@ -285,13 +285,6 @@ func (sc *ShockClient) CreateOrUpdate(opts Opts, nodeid string, nodeattr map[str
 				err = errors.New("(CreateOrUpdate) (case:virtual_file) missing virtual node parameter: source")
 				return
 			}
-		case "index":
-			if opts.HasKey("index_type") {
-				url += "/index/" + opts.Value("index_type")
-			} else {
-				err = errors.New("missing index type when creating index")
-				return
-			}
 		case "copy":
 			if opts.HasKey("parent_node") {
 				form.AddParam("copy_data", opts.Value("parent_node"))
