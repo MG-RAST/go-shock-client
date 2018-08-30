@@ -210,12 +210,12 @@ func (sc *ShockClient) doRequest(method string, resource string, query url.Value
 }
 
 // for PUT / POST with multipart form
-func (sc *ShockClient) CreateOrUpdate(opts Opts, nodeid string, nodeattr map[string]interface{}) (node *ShockNode, err error) {
+func (sc *ShockClient) createOrUpdate(opts Opts, nodeid string, nodeattr map[string]interface{}) (node *ShockNode, err error) {
 	host := sc.Host
 	token := sc.Token
 
 	if host == "" {
-		err = errors.New("(CreateOrUpdate) host is not defined in Shock node")
+		err = errors.New("(createOrUpdate) host is not defined in Shock node")
 		return
 	}
 
@@ -235,7 +235,7 @@ func (sc *ShockClient) CreateOrUpdate(opts Opts, nodeid string, nodeattr map[str
 		var nodeattr_json []byte
 		nodeattr_json, err = json.Marshal(nodeattr)
 		if err != nil {
-			err = errors.New("(CreateOrUpdate) error marshalling NodeAttr")
+			err = errors.New("(createOrUpdate) error marshalling NodeAttr")
 			return
 		}
 		form.AddParam("attributes_str", string(nodeattr_json[:]))
@@ -267,7 +267,7 @@ func (sc *ShockClient) CreateOrUpdate(opts Opts, nodeid string, nodeattr map[str
 			if opts.HasKey("parts") {
 				form.AddParam("parts", opts.Value("parts"))
 			} else {
-				err = errors.New("(CreateOrUpdate) (case:parts) missing partial upload parameter: parts")
+				err = errors.New("(createOrUpdate) (case:parts) missing partial upload parameter: parts")
 				return
 			}
 			if opts.HasKey("file_name") {
@@ -277,14 +277,14 @@ func (sc *ShockClient) CreateOrUpdate(opts Opts, nodeid string, nodeattr map[str
 			if opts.HasKey("part") && opts.HasKey("file") {
 				form.AddFile(opts.Value("part"), opts.Value("file"))
 			} else {
-				err = errors.New("(CreateOrUpdate) (case:part) missing partial upload parameter: part or file")
+				err = errors.New("(createOrUpdate) (case:part) missing partial upload parameter: part or file")
 				return
 			}
 		case "remote_path":
 			if opts.HasKey("remote_path") {
 				form.AddParam("path", opts.Value("remote_path"))
 			} else {
-				err = errors.New("(CreateOrUpdate) (case:remote_path) missing remote path parameter: path")
+				err = errors.New("(createOrUpdate) (case:remote_path) missing remote path parameter: path")
 				return
 			}
 		case "virtual_file":
@@ -292,14 +292,14 @@ func (sc *ShockClient) CreateOrUpdate(opts Opts, nodeid string, nodeattr map[str
 				form.AddParam("type", "virtual")
 				form.AddParam("source", opts.Value("virtual_file"))
 			} else {
-				err = errors.New("(CreateOrUpdate) (case:virtual_file) missing virtual node parameter: source")
+				err = errors.New("(createOrUpdate) (case:virtual_file) missing virtual node parameter: source")
 				return
 			}
 		case "copy":
 			if opts.HasKey("parent_node") {
 				form.AddParam("copy_data", opts.Value("parent_node"))
 			} else {
-				err = errors.New("(CreateOrUpdate) (case:copy) missing copy node parameter: parent_node")
+				err = errors.New("(createOrUpdate) (case:copy) missing copy node parameter: parent_node")
 				return
 			}
 			if opts.HasKey("copy_indexes") {
@@ -311,7 +311,7 @@ func (sc *ShockClient) CreateOrUpdate(opts Opts, nodeid string, nodeattr map[str
 				form.AddParam("parent_index", opts.Value("parent_index"))
 				form.AddFile("subset_indices", opts.Value("file"))
 			} else {
-				err = errors.New("(CreateOrUpdate) (case:subset) missing subset node parameter: parent_node or parent_index or file")
+				err = errors.New("(createOrUpdate) (case:subset) missing subset node parameter: parent_node or parent_index or file")
 				return
 			}
 		}
@@ -319,7 +319,7 @@ func (sc *ShockClient) CreateOrUpdate(opts Opts, nodeid string, nodeattr map[str
 
 	err = form.Create()
 	if err != nil {
-		err = fmt.Errorf("(CreateOrUpdate) form.Create returned: %s", err.Error())
+		err = fmt.Errorf("(createOrUpdate) form.Create returned: %s", err.Error())
 		return
 	}
 
@@ -332,29 +332,29 @@ func (sc *ShockClient) CreateOrUpdate(opts Opts, nodeid string, nodeattr map[str
 		user = httpclient.GetUserByTokenAuth(token)
 	}
 	if sc.Debug {
-		fmt.Printf("(CreateOrUpdate) url: %s %s\n", method, url)
+		fmt.Printf("(createOrUpdate) url: %s %s\n", method, url)
 	}
 	var res *http.Response
 	res, err = httpclient.Do(method, url, headers, form.Reader, user)
 	if err != nil {
-		err = fmt.Errorf("(CreateOrUpdate) httpclient.Do returned: %s", err.Error())
+		err = fmt.Errorf("(createOrUpdate) httpclient.Do returned: %s", err.Error())
 		return
 	}
 
 	defer res.Body.Close()
 	jsonstream, err := ioutil.ReadAll(res.Body)
 	if err != nil {
-		err = fmt.Errorf("(CreateOrUpdate) ioutil.ReadAll returned: %s", err.Error())
+		err = fmt.Errorf("(createOrUpdate) ioutil.ReadAll returned: %s", err.Error())
 		return
 	}
 	response := new(ShockResponse)
 	err = json.Unmarshal(jsonstream, response)
 	if err != nil {
-		err = fmt.Errorf("(CreateOrUpdate) (httpclient.Do) failed to marshal response:\"%s\" (err: %s)", jsonstream, err.Error())
+		err = fmt.Errorf("(createOrUpdate) (httpclient.Do) failed to marshal response:\"%s\" (err: %s)", jsonstream, err.Error())
 		return
 	}
 	if len(response.Errs) > 0 {
-		err = fmt.Errorf("(CreateOrUpdate) type=%s, method=%s, url=%s, error=%s", uploadType, method, url, strings.Join(response.Errs, ","))
+		err = fmt.Errorf("(createOrUpdate) type=%s, method=%s, url=%s, error=%s", uploadType, method, url, strings.Join(response.Errs, ","))
 		return
 	}
 	node = response.Data
@@ -457,7 +457,7 @@ func (sc *ShockClient) PutOrPostFile(filename string, nodeid string, rank int, a
 	}
 
 	var node *ShockNode
-	node, err = sc.CreateOrUpdate(opts, nodeid, nodeattr)
+	node, err = sc.createOrUpdate(opts, nodeid, nodeattr)
 	if err != nil {
 		err = fmt.Errorf("(PutFileToShock) failed (%s): %v", sc.Host, err)
 		return
