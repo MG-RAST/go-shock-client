@@ -43,6 +43,8 @@ type ShockResponseGeneric struct {
 	Errs []string    `bson:"error" json:"error"`
 }
 
+type ShockResponseMap map[string]interface{}
+
 type ShockQueryResponse struct {
 	Code       int         `bson:"status" json:"status"`
 	Data       []ShockNode `bson:"data" json:"data"`
@@ -363,6 +365,12 @@ func (sc *ShockClient) createOrUpdate(opts Opts, nodeid string, nodeattr map[str
 
 // *** high-level functions ***
 
+func (sc *ShockClient) ServerInfo() (srm *ShockResponseMap, err error) {
+	srm = new(ShockResponseMap)
+	err = sc.getRequest("", nil, &srm)
+	return
+}
+
 func (sc *ShockClient) WaitIndex(nodeid string, indexname string) (index IdxInfo, err error) {
 	if indexname == "" {
 		return
@@ -480,6 +488,16 @@ func (sc *ShockClient) PostFile(filepath string, filename string) (nodeid string
 	if node != nil {
 		nodeid = node.Id
 	}
+	return
+}
+
+// create basic node with file POST
+func (sc *ShockClient) PostFileWithAttributes(filepath string, filename string, nodeattr map[string]interface{}) (node *ShockNode, err error) {
+	opts := Opts{"upload_type": "basic", "file": filepath}
+	if filename != "" {
+		opts["file_name"] = filename
+	}
+	node, err = sc.createOrUpdate(opts, "", nodeattr)
 	return
 }
 
