@@ -478,7 +478,10 @@ func (sc *ShockClient) PutOrPostFile(filename string, nodeid string, rank int, a
 
 // create basic node with file POST
 func (sc *ShockClient) PostFile(filepath string, filename string) (nodeid string, err error) {
-	opts := Opts{"upload_type": "basic", "file": filepath}
+	opts := Opts{
+		"upload_type": "basic",
+		"file":        filepath,
+	}
 	if filename != "" {
 		opts["file_name"] = filename
 	}
@@ -493,7 +496,10 @@ func (sc *ShockClient) PostFile(filepath string, filename string) (nodeid string
 
 // create basic node with file POST
 func (sc *ShockClient) PostFileWithAttributes(filepath string, filename string, nodeattr map[string]interface{}) (node *ShockNode, err error) {
-	opts := Opts{"upload_type": "basic", "file": filepath}
+	opts := Opts{
+		"upload_type": "basic",
+		"file":        filepath,
+	}
 	if filename != "" {
 		opts["file_name"] = filename
 	}
@@ -541,7 +547,10 @@ func (sc *ShockClient) UpdateAttributes(nodeid string, attrfile string, nodeattr
 
 // change node filename
 func (sc *ShockClient) UpdateFilename(nodeid string, filename string) (err error) {
-	opts := Opts{"upload_type": "basic", "file_name": filename}
+	opts := Opts{
+		"upload_type": "basic",
+		"file_name":   filename,
+	}
 	_, err = sc.createOrUpdate(opts, nodeid, nil)
 	return
 }
@@ -570,9 +579,31 @@ func (sc *ShockClient) PutIndex(nodeid string, indexname string) (err error) {
 		err = fmt.Errorf("(PutIndex) node=%s, index=%s: %s", nodeid, indexname, err.Error())
 		return
 	}
-
 	if len(sr.Errs) > 0 {
 		err = fmt.Errorf("(PutIndex) node=%s, index=%s: %s", nodeid, indexname, strings.Join(sr.Errs, ","))
+	}
+	return
+}
+
+func (sc *ShockClient) PutIndexQuery(nodeid string, indexname string, force bool, column int) (err error) {
+	if indexname == "" {
+		return
+	}
+	var query url.Values
+	if force {
+		query.Add("force_rebuild", "1")
+	}
+	if column > 0 {
+		query.Add("number", strconv.Itoa(column))
+	}
+	sr := new(ShockResponseGeneric)
+	err = sc.putRequest("/node/"+nodeid+"/index/"+indexname, query, &sr)
+	if err != nil {
+		err = fmt.Errorf("(PutIndexQuery) node=%s, index=%s: %s", nodeid, indexname, err.Error())
+		return
+	}
+	if len(sr.Errs) > 0 {
+		err = fmt.Errorf("(PutIndexQuery) node=%s, index=%s: %s", nodeid, indexname, strings.Join(sr.Errs, ","))
 	}
 	return
 }
@@ -645,6 +676,23 @@ func (sc *ShockClient) MakePublic(nodeid string) (err error) {
 	return
 }
 
+func (sc *ShockClient) ChownNode(nodeid string, username string) (err error) {
+	var query url.Values
+	query.Add("users", username)
+
+	sr := new(ShockResponseGeneric)
+	err = sc.putRequest("/node/"+nodeid+"/acl/owner", query, &sr)
+	if err != nil {
+		err = fmt.Errorf("(ChownNode) node=%s: %s", nodeid, err.Error())
+		return
+	}
+
+	if len(sr.Errs) > 0 {
+		err = fmt.Errorf("(ChownNode) node=%s: %s", nodeid, strings.Join(sr.Errs, ","))
+	}
+	return
+}
+
 func (sc *ShockClient) GetNodeDownloadUrl(node ShockNode) (downloadUrl string, err error) {
 	var myurl *url.URL
 	myurl, err = url.ParseRequestURI(sc.Host)
@@ -660,7 +708,7 @@ func (sc *ShockClient) GetNodeDownloadUrl(node ShockNode) (downloadUrl string, e
 func (sc *ShockClient) Query(query url.Values) (sr *ShockQueryResponse, err error) {
 	query.Add("query", "")
 	sr = new(ShockQueryResponse)
-	err = sc.getRequest("/node/", query, &sr)
+	err = sc.getRequest("/node", query, &sr)
 	if err != nil {
 		err = fmt.Errorf("(Query) %s", err.Error())
 		return
@@ -719,7 +767,7 @@ func (sc *ShockClient) GetNode(nodeid string) (node *ShockNode, err error) {
 
 func (sc *ShockClient) DeleteNode(nodeid string) (err error) {
 	sr := new(ShockResponseGeneric)
-	err = sc.deleteRequest("/node"+nodeid, nil, &sr)
+	err = sc.deleteRequest("/node/"+nodeid, nil, &sr)
 	if err != nil {
 		err = fmt.Errorf("(DeleteNode) node=%s: %s", nodeid, err.Error())
 		return
@@ -731,7 +779,7 @@ func (sc *ShockClient) DeleteNode(nodeid string) (err error) {
 	return
 }
 
-// old-style functions that probably should to be refactored
+// old-style functions that probably should be refactored
 
 func ShockGet(host string, nodeid string, token string) (node *ShockNode, err error) {
 	if host == "" || nodeid == "" {
