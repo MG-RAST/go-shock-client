@@ -54,15 +54,6 @@ type ShockQueryResponse struct {
 	TotalCount int         `bson:"total_count" json:"total_count"`
 }
 
-type ShockQueryResponseGeneric struct {
-	Code       int         `bson:"status" json:"status"`
-	Data       interface{} `bson:"data" json:"data"`
-	Errs       []string    `bson:"error" json:"error"`
-	Limit      int         `bson:"limit" json:"limit"`
-	Offset     int         `bson:"offset" json:"offset"`
-	TotalCount int         `bson:"total_count" json:"total_count"`
-}
-
 type ShockNode struct {
 	Id           string             `bson:"id" json:"id"`
 	Version      string             `bson:"version" json:"version"`
@@ -193,9 +184,6 @@ func (sc *ShockClient) doRequestString(method string, resource string, query url
 	if err != nil {
 		return
 	}
-	if sc.Debug {
-		fmt.Fprintf(os.Stdout, "json response:\n %s\n", string(jsonstream))
-	}
 
 	return
 }
@@ -251,6 +239,11 @@ func (sc *ShockClient) createOrUpdate(opts Opts, nodeid string, nodeattr map[str
 		form.AddParam("remove_expiration", "1")
 	}
 
+	// filename
+	if opts.HasKey("file_name") {
+		form.AddParam("file_name", opts.Value("file_name"))
+	}
+
 	var uploadType string
 	if opts.HasKey("upload_type") {
 		uploadType = opts.Value("upload_type")
@@ -259,11 +252,12 @@ func (sc *ShockClient) createOrUpdate(opts Opts, nodeid string, nodeattr map[str
 	if uploadType != "" {
 		switch uploadType {
 		case "basic":
-			if opts.HasKey("file") { // upload_type: basic , file=...
-				form.AddFile("upload", opts.Value("file"))
-			}
-			if opts.HasKey("file_name") {
-				form.AddParam("file_name", opts.Value("file_name"))
+			if opts.HasKey("file") {
+				if opts.HasKey("compression") {
+					form.AddFile(opts.Value("compression"), opts.Value("file"))
+				} else {
+					form.AddFile("upload", opts.Value("file"))
+				}
 			}
 		case "parts":
 			if opts.HasKey("parts") {
@@ -272,8 +266,8 @@ func (sc *ShockClient) createOrUpdate(opts Opts, nodeid string, nodeattr map[str
 				err = errors.New("(createOrUpdate) (case:parts) missing partial upload parameter: parts")
 				return
 			}
-			if opts.HasKey("file_name") {
-				form.AddParam("file_name", opts.Value("file_name"))
+			if opts.HasKey("compression") {
+				form.AddParam("compression", opts.Value("compression"))
 			}
 		case "part":
 			if opts.HasKey("part") && opts.HasKey("file") {
@@ -282,14 +276,14 @@ func (sc *ShockClient) createOrUpdate(opts Opts, nodeid string, nodeattr map[str
 				err = errors.New("(createOrUpdate) (case:part) missing partial upload parameter: part or file")
 				return
 			}
-		case "remote_path":
-			if opts.HasKey("remote_path") {
-				form.AddParam("path", opts.Value("remote_path"))
+		case "remote":
+			if opts.HasKey("remote_url") {
+				form.AddParam("upload_url", opts.Value("remote_url"))
 			} else {
-				err = errors.New("(createOrUpdate) (case:remote_path) missing remote path parameter: path")
+				err = errors.New("(createOrUpdate) (case:remote_url) missing remote path parameter: path")
 				return
 			}
-		case "virtual_file":
+		case "virtual":
 			if opts.HasKey("virtual_file") {
 				form.AddParam("type", "virtual")
 				form.AddParam("source", opts.Value("virtual_file"))
@@ -306,6 +300,9 @@ func (sc *ShockClient) createOrUpdate(opts Opts, nodeid string, nodeattr map[str
 			}
 			if opts.HasKey("copy_indexes") {
 				form.AddParam("copy_indexes", "1")
+			}
+			if opts.HasKey("copy_attributes") {
+				form.AddParam("copy_attributes", "1")
 			}
 		case "subset":
 			if opts.HasKey("parent_node") && opts.HasKey("parent_index") && opts.HasKey("file") {
@@ -335,6 +332,7 @@ func (sc *ShockClient) createOrUpdate(opts Opts, nodeid string, nodeattr map[str
 	}
 	if sc.Debug {
 		fmt.Printf("(createOrUpdate) url: %s %s\n", method, url)
+		fmt.Printf("multipart form:\n%s", form.Print())
 	}
 	var res *http.Response
 	res, err = httpclient.Do(method, url, headers, form.Reader, user)
@@ -364,6 +362,59 @@ func (sc *ShockClient) createOrUpdate(opts Opts, nodeid string, nodeattr map[str
 }
 
 // *** high-level functions ***
+
+// unpack archive node, creates multiple nodes
+func (sc *ShockClient) UnpackArchiveNode(nodeid string, format string, attrfile string) (nodes interface{}, err error) {
+	form := httpclient.NewForm()
+	if attrfile != "" {
+		form.AddFile("attributes", attrfile)
+	}
+	form.AddParam("unpack_node", nodeid)
+	form.AddParam("archive_format", format)
+
+	err = form.Create()
+	if err != nil {
+		err = fmt.Errorf("(UnpackArchiveNode) form.Create returned: %s", err.Error())
+		return
+	}
+
+	headers := httpclient.Header{
+		"Content-Type":   []string{form.ContentType},
+		"Content-Length": []string{strconv.FormatInt(form.Length, 10)},
+	}
+
+	var user *httpclient.Auth
+	if sc.Token != "" {
+		user = httpclient.GetUserByTokenAuth(sc.Token)
+	}
+
+	var res *http.Response
+	res, err = httpclient.Do("POST", sc.Host+"/node", headers, form.Reader, user)
+	if err != nil {
+		err = fmt.Errorf("(UnpackArchiveNode) httpclient.Do returned: %s", err.Error())
+		return
+	}
+
+	defer res.Body.Close()
+	jsonstream, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		err = fmt.Errorf("(UnpackArchiveNode) ioutil.ReadAll returned: %s", err.Error())
+		return
+	}
+	response := new(ShockResponseGeneric)
+	err = json.Unmarshal(jsonstream, response)
+	if err != nil {
+		err = fmt.Errorf("(UnpackArchiveNode) failed to marshal response:\"%s\" (err: %s)", jsonstream, err.Error())
+		return
+	}
+
+	if len(response.Errs) > 0 {
+		err = fmt.Errorf("(UnpackArchiveNode) error=%s", strings.Join(response.Errs, ","))
+		return
+	}
+
+	return response.Data, nil
+}
 
 func (sc *ShockClient) ServerInfo() (srm *ShockResponseMap, err error) {
 	srm = new(ShockResponseMap)
@@ -447,7 +498,6 @@ func (sc *ShockClient) PutOrPostFile(filename string, nodeid string, rank int, a
 	}
 	if filename != "" {
 		opts["file"] = filename
-		opts["file_name"] = path.Base(filename)
 	}
 	if rank == 0 {
 		opts["upload_type"] = "basic"
@@ -455,13 +505,18 @@ func (sc *ShockClient) PutOrPostFile(filename string, nodeid string, rank int, a
 		opts["upload_type"] = "part"
 		opts["part"] = strconv.Itoa(rank)
 	}
+
+	// apply form options for different node types
 	if (ntype == "subset") && (rank == 0) && (fi.Size() == 0) {
 		opts["upload_type"] = "basic"
-	} else if ((ntype == "copy") || (ntype == "subset")) && (len(formopts) > 0) {
+	} else if ((ntype == "copy") || (ntype == "subset") || (ntype == "remote") || (ntype == "virtual") || (ntype == "parts")) && (len(formopts) > 0) {
 		opts["upload_type"] = ntype
 		for k, v := range formopts {
 			opts[k] = v
 		}
+	}
+	if v, ok := formopts["compression"]; ok {
+		opts["compression"] = v
 	}
 
 	var node *ShockNode
@@ -478,7 +533,10 @@ func (sc *ShockClient) PutOrPostFile(filename string, nodeid string, rank int, a
 
 // create basic node with file POST
 func (sc *ShockClient) PostFile(filepath string, filename string) (nodeid string, err error) {
-	opts := Opts{"upload_type": "basic", "file": filepath}
+	opts := Opts{
+		"upload_type": "basic",
+		"file":        filepath,
+	}
 	if filename != "" {
 		opts["file_name"] = filename
 	}
@@ -493,7 +551,10 @@ func (sc *ShockClient) PostFile(filepath string, filename string) (nodeid string
 
 // create basic node with file POST
 func (sc *ShockClient) PostFileWithAttributes(filepath string, filename string, nodeattr map[string]interface{}) (node *ShockNode, err error) {
-	opts := Opts{"upload_type": "basic", "file": filepath}
+	opts := Opts{
+		"upload_type": "basic",
+		"file":        filepath,
+	}
 	if filename != "" {
 		opts["file_name"] = filename
 	}
@@ -541,7 +602,10 @@ func (sc *ShockClient) UpdateAttributes(nodeid string, attrfile string, nodeattr
 
 // change node filename
 func (sc *ShockClient) UpdateFilename(nodeid string, filename string) (err error) {
-	opts := Opts{"upload_type": "basic", "file_name": filename}
+	opts := Opts{
+		"upload_type": "basic",
+		"file_name":   filename,
+	}
 	_, err = sc.createOrUpdate(opts, nodeid, nil)
 	return
 }
@@ -570,9 +634,31 @@ func (sc *ShockClient) PutIndex(nodeid string, indexname string) (err error) {
 		err = fmt.Errorf("(PutIndex) node=%s, index=%s: %s", nodeid, indexname, err.Error())
 		return
 	}
-
 	if len(sr.Errs) > 0 {
 		err = fmt.Errorf("(PutIndex) node=%s, index=%s: %s", nodeid, indexname, strings.Join(sr.Errs, ","))
+	}
+	return
+}
+
+func (sc *ShockClient) PutIndexQuery(nodeid string, indexname string, force bool, column int) (err error) {
+	if indexname == "" {
+		return
+	}
+	query := url.Values{}
+	if force {
+		query.Set("force_rebuild", "1")
+	}
+	if column > 0 {
+		query.Set("number", strconv.Itoa(column))
+	}
+	sr := new(ShockResponseGeneric)
+	err = sc.putRequest("/node/"+nodeid+"/index/"+indexname, query, &sr)
+	if err != nil {
+		err = fmt.Errorf("(PutIndexQuery) node=%s, index=%s: %s", nodeid, indexname, err.Error())
+		return
+	}
+	if len(sr.Errs) > 0 {
+		err = fmt.Errorf("(PutIndexQuery) node=%s, index=%s: %s", nodeid, indexname, strings.Join(sr.Errs, ","))
 	}
 	return
 }
@@ -581,8 +667,8 @@ func (sc *ShockClient) PutAcl(nodeid string, acltype string, username string) (e
 	if (acltype == "") || (username == "") {
 		return
 	}
-	var query url.Values
-	query.Add("users", username)
+	query := url.Values{}
+	query.Set("users", username)
 
 	sr := new(ShockResponseGeneric)
 	err = sc.putRequest("/node/"+nodeid+"/acl/"+acltype, query, &sr)
@@ -598,11 +684,13 @@ func (sc *ShockClient) PutAcl(nodeid string, acltype string, username string) (e
 }
 
 func (sc *ShockClient) DeleteAcl(nodeid string, acltype string, username string) (err error) {
-	if (acltype == "") || (username == "") {
+	if acltype == "" {
 		return
 	}
-	var query url.Values
-	query.Add("users", username)
+	query := url.Values{}
+	if !strings.HasPrefix(acltype, "public") {
+		query.Set("users", username)
+	}
 
 	sr := new(ShockResponseGeneric)
 	err = sc.deleteRequest("/node/"+nodeid+"/acl/"+acltype, query, &sr)
@@ -645,6 +733,23 @@ func (sc *ShockClient) MakePublic(nodeid string) (err error) {
 	return
 }
 
+func (sc *ShockClient) ChownNode(nodeid string, username string) (err error) {
+	query := url.Values{}
+	query.Set("users", username)
+
+	sr := new(ShockResponseGeneric)
+	err = sc.putRequest("/node/"+nodeid+"/acl/owner", query, &sr)
+	if err != nil {
+		err = fmt.Errorf("(ChownNode) node=%s: %s", nodeid, err.Error())
+		return
+	}
+
+	if len(sr.Errs) > 0 {
+		err = fmt.Errorf("(ChownNode) node=%s: %s", nodeid, strings.Join(sr.Errs, ","))
+	}
+	return
+}
+
 func (sc *ShockClient) GetNodeDownloadUrl(node ShockNode) (downloadUrl string, err error) {
 	var myurl *url.URL
 	myurl, err = url.ParseRequestURI(sc.Host)
@@ -658,9 +763,20 @@ func (sc *ShockClient) GetNodeDownloadUrl(node ShockNode) (downloadUrl string, e
 }
 
 func (sc *ShockClient) Query(query url.Values) (sr *ShockQueryResponse, err error) {
-	query.Add("query", "")
+	query.Set("query", "")
+	sr, err = sc.nodeQuery(query)
+	return
+}
+
+func (sc *ShockClient) QueryFull(query url.Values) (sr *ShockQueryResponse, err error) {
+	query.Set("querynode", "")
+	sr, err = sc.nodeQuery(query)
+	return
+}
+
+func (sc *ShockClient) nodeQuery(query url.Values) (sr *ShockQueryResponse, err error) {
 	sr = new(ShockQueryResponse)
-	err = sc.getRequest("/node/", query, &sr)
+	err = sc.getRequest("/node", query, &sr)
 	if err != nil {
 		err = fmt.Errorf("(Query) %s", err.Error())
 		return
@@ -672,7 +788,7 @@ func (sc *ShockClient) Query(query url.Values) (sr *ShockQueryResponse, err erro
 }
 
 func (sc *ShockClient) QueryPaginated(resource string, query url.Values, limit int, offset int) (rc *httpclient.RestClient, err error) {
-	query.Add("query", "")
+	query.Set("query", "")
 	query.Set("limit", strconv.Itoa(limit))
 	query.Set("offset", strconv.Itoa(offset))
 
@@ -719,7 +835,7 @@ func (sc *ShockClient) GetNode(nodeid string) (node *ShockNode, err error) {
 
 func (sc *ShockClient) DeleteNode(nodeid string) (err error) {
 	sr := new(ShockResponseGeneric)
-	err = sc.deleteRequest("/node"+nodeid, nil, &sr)
+	err = sc.deleteRequest("/node/"+nodeid, nil, &sr)
 	if err != nil {
 		err = fmt.Errorf("(DeleteNode) node=%s: %s", nodeid, err.Error())
 		return
@@ -731,7 +847,7 @@ func (sc *ShockClient) DeleteNode(nodeid string) (err error) {
 	return
 }
 
-// old-style functions that probably should to be refactored
+// old-style functions that probably should be refactored
 
 func ShockGet(host string, nodeid string, token string) (node *ShockNode, err error) {
 	if host == "" || nodeid == "" {
