@@ -774,6 +774,19 @@ func (sc *ShockClient) QueryFull(query url.Values) (sr *ShockQueryResponse, err 
 	return
 }
 
+func (sc *ShockClient) QueryDistinct(query url.Values) (sr *ShockResponseGeneric, err error) {
+    sr = new(ShockResponseGeneric)
+    err = sc.getRequest("/node", query, &sr)
+	if err != nil {
+		err = fmt.Errorf("(QueryDistinct) %s", err.Error())
+		return
+	}
+	if len(sr.Errs) > 0 {
+		err = fmt.Errorf("(QueryDistinct) %s", strings.Join(sr.Errs, ","))
+	}
+	return
+}
+
 func (sc *ShockClient) nodeQuery(query url.Values) (sr *ShockQueryResponse, err error) {
 	sr = new(ShockQueryResponse)
 	err = sc.getRequest("/node", query, &sr)
