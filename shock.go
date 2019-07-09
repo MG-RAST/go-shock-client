@@ -6,9 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/MG-RAST/golib/httpclient"
 	"io"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -16,6 +16,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/MG-RAST/golib/httpclient"
 )
 
 // TODO use Token
@@ -549,7 +551,52 @@ func (sc *ShockClient) PostFile(filepath string, filename string) (nodeid string
 	return
 }
 
-// create basic node with file POST
+// create basic node if file is not in shock already, otherwise returns a new copy node
+func (sc *ShockClient) PostFileMD5(filepath string, filename string) (nodeid string, err error) {
+
+	var md5sum string
+	md5sum, err = GetMD5FromFile(filepath)
+	if err != nil {
+		return
+	}
+
+	opts := Opts{
+		"upload_type":  "basic",
+		"file":         filepath,
+		"checksum-md5": md5sum,
+	}
+	if filename != "" {
+		opts["file_name"] = filename
+	}
+
+	var node *ShockNode
+	node, err = sc.createOrUpdate(opts, "", nil)
+	if node != nil {
+		nodeid = node.Id
+	}
+	return
+}
+
+// GetMD5FromFile _
+func GetMD5FromFile(path string) (md5sum string, err error) {
+	f, err := os.Open(path)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer f.Close()
+
+	h := md5.New()
+	_, err = io.Copy(h, f)
+	if err != nil {
+		log.Fatal(err)
+		return
+	}
+
+	md5sum = fmt.Sprintf("%x", h.Sum(nil))
+	return
+}
+
+// PostFileWithAttributes create basic node with file POST
 func (sc *ShockClient) PostFileWithAttributes(filepath string, filename string, nodeattr map[string]interface{}) (node *ShockNode, err error) {
 	opts := Opts{
 		"upload_type": "basic",
@@ -562,7 +609,7 @@ func (sc *ShockClient) PostFileWithAttributes(filepath string, filename string, 
 	return
 }
 
-// create empty node, basic or parts
+// CreateNode create empty node, basic or parts
 func (sc *ShockClient) CreateNode(filename string, numParts int) (nodeid string, err error) {
 	sr := new(ShockResponse)
 	err = sc.postRequest("/node", nil, &sr)
@@ -590,7 +637,7 @@ func (sc *ShockClient) CreateNode(filename string, numParts int) (nodeid string,
 	return
 }
 
-// update node attributes
+// UpdateAttributes update node attributes
 func (sc *ShockClient) UpdateAttributes(nodeid string, attrfile string, nodeattr map[string]interface{}) (err error) {
 	opts := Opts{}
 	if attrfile != "" {
@@ -600,7 +647,7 @@ func (sc *ShockClient) UpdateAttributes(nodeid string, attrfile string, nodeattr
 	return
 }
 
-// change node filename
+// UpdateFilename change node filename
 func (sc *ShockClient) UpdateFilename(nodeid string, filename string) (err error) {
 	opts := Opts{
 		"upload_type": "basic",
@@ -610,7 +657,7 @@ func (sc *ShockClient) UpdateFilename(nodeid string, filename string) (err error
 	return
 }
 
-// add / modify / delete expiration
+// Expiration add / modify / delete expiration
 func (sc *ShockClient) Expiration(nodeid string, value int, format byte) (err error) {
 	opts := Opts{}
 	if value == 0 {
@@ -624,6 +671,7 @@ func (sc *ShockClient) Expiration(nodeid string, value int, format byte) (err er
 	return
 }
 
+// PutIndex _
 func (sc *ShockClient) PutIndex(nodeid string, indexname string) (err error) {
 	if indexname == "" {
 		return
@@ -640,6 +688,7 @@ func (sc *ShockClient) PutIndex(nodeid string, indexname string) (err error) {
 	return
 }
 
+// PutIndexQuery _
 func (sc *ShockClient) PutIndexQuery(nodeid string, indexname string, force bool, column int) (err error) {
 	if indexname == "" {
 		return
@@ -663,6 +712,7 @@ func (sc *ShockClient) PutIndexQuery(nodeid string, indexname string, force bool
 	return
 }
 
+// PutAcl _
 func (sc *ShockClient) PutAcl(nodeid string, acltype string, username string) (err error) {
 	if (acltype == "") || (username == "") {
 		return
@@ -683,6 +733,7 @@ func (sc *ShockClient) PutAcl(nodeid string, acltype string, username string) (e
 	return
 }
 
+// DeleteAcl _
 func (sc *ShockClient) DeleteAcl(nodeid string, acltype string, username string) (err error) {
 	if acltype == "" {
 		return
@@ -705,6 +756,7 @@ func (sc *ShockClient) DeleteAcl(nodeid string, acltype string, username string)
 	return
 }
 
+// GetAcl _
 func (sc *ShockClient) GetAcl(nodeid string) (sr *ShockResponseGeneric, err error) {
 	sr = new(ShockResponseGeneric)
 	err = sc.getRequest("/node/"+nodeid+"/acl", nil, &sr)
@@ -719,6 +771,7 @@ func (sc *ShockClient) GetAcl(nodeid string) (sr *ShockResponseGeneric, err erro
 	return
 }
 
+// MakePublic _
 func (sc *ShockClient) MakePublic(nodeid string) (err error) {
 	sr := new(ShockResponseGeneric)
 	err = sc.putRequest("/node/"+nodeid+"/acl/public_read", nil, &sr)
@@ -733,6 +786,7 @@ func (sc *ShockClient) MakePublic(nodeid string) (err error) {
 	return
 }
 
+// ChownNode _
 func (sc *ShockClient) ChownNode(nodeid string, username string) (err error) {
 	query := url.Values{}
 	query.Set("users", username)
@@ -750,6 +804,7 @@ func (sc *ShockClient) ChownNode(nodeid string, username string) (err error) {
 	return
 }
 
+// GetNodeDownloadUrl _
 func (sc *ShockClient) GetNodeDownloadUrl(node ShockNode) (downloadUrl string, err error) {
 	var myurl *url.URL
 	myurl, err = url.ParseRequestURI(sc.Host)
@@ -762,21 +817,24 @@ func (sc *ShockClient) GetNodeDownloadUrl(node ShockNode) (downloadUrl string, e
 	return
 }
 
+// Query _
 func (sc *ShockClient) Query(query url.Values) (sr *ShockQueryResponse, err error) {
 	query.Set("query", "")
 	sr, err = sc.nodeQuery(query)
 	return
 }
 
+// QueryFull _
 func (sc *ShockClient) QueryFull(query url.Values) (sr *ShockQueryResponse, err error) {
 	query.Set("querynode", "")
 	sr, err = sc.nodeQuery(query)
 	return
 }
 
+// QueryDistinct _
 func (sc *ShockClient) QueryDistinct(query url.Values) (sr *ShockResponseGeneric, err error) {
-    sr = new(ShockResponseGeneric)
-    err = sc.getRequest("/node", query, &sr)
+	sr = new(ShockResponseGeneric)
+	err = sc.getRequest("/node", query, &sr)
 	if err != nil {
 		err = fmt.Errorf("(QueryDistinct) %s", err.Error())
 		return
@@ -787,6 +845,7 @@ func (sc *ShockClient) QueryDistinct(query url.Values) (sr *ShockResponseGeneric
 	return
 }
 
+// nodeQuery
 func (sc *ShockClient) nodeQuery(query url.Values) (sr *ShockQueryResponse, err error) {
 	sr = new(ShockQueryResponse)
 	err = sc.getRequest("/node", query, &sr)
@@ -800,6 +859,7 @@ func (sc *ShockClient) nodeQuery(query url.Values) (sr *ShockQueryResponse, err 
 	return
 }
 
+// QueryPaginated _
 func (sc *ShockClient) QueryPaginated(resource string, query url.Values, limit int, offset int) (rc *httpclient.RestClient, err error) {
 	query.Set("query", "")
 	query.Set("limit", strconv.Itoa(limit))
@@ -826,6 +886,7 @@ func (sc *ShockClient) QueryPaginated(resource string, query url.Values, limit i
 	return
 }
 
+// GetNode _
 func (sc *ShockClient) GetNode(nodeid string) (node *ShockNode, err error) {
 	sr := new(ShockResponse)
 	err = sc.getRequest("/node/"+nodeid, nil, &sr)
@@ -846,6 +907,7 @@ func (sc *ShockClient) GetNode(nodeid string) (node *ShockNode, err error) {
 	return
 }
 
+// DeleteNode _
 func (sc *ShockClient) DeleteNode(nodeid string) (err error) {
 	sr := new(ShockResponseGeneric)
 	err = sc.deleteRequest("/node/"+nodeid, nil, &sr)
@@ -861,7 +923,7 @@ func (sc *ShockClient) DeleteNode(nodeid string) (err error) {
 }
 
 // old-style functions that probably should be refactored
-
+// ShockGet _
 func ShockGet(host string, nodeid string, token string) (node *ShockNode, err error) {
 	if host == "" || nodeid == "" {
 		err = errors.New("empty shock host or node id")
@@ -873,6 +935,7 @@ func ShockGet(host string, nodeid string, token string) (node *ShockNode, err er
 	return
 }
 
+// ShockDelete _
 func ShockDelete(host string, nodeid string, token string) (err error) {
 	if host == "" || nodeid == "" {
 		return errors.New("empty shock host or node id")
@@ -883,7 +946,7 @@ func ShockDelete(host string, nodeid string, token string) (err error) {
 	return
 }
 
-// fetch file by shock url
+// FetchFile fetch file by shock url
 func FetchFile(filename string, url string, token string, uncompress string, computeMD5 bool) (size int64, md5sum string, err error) {
 	var localfile *os.File
 	localfile, err = os.Create(filename)
@@ -952,6 +1015,7 @@ func FetchFile(filename string, url string, token string, uncompress string, com
 	return
 }
 
+// FetchShockStream _
 func FetchShockStream(url string, token string) (r io.ReadCloser, err error) {
 	var user *httpclient.Auth
 	if token != "" {
@@ -968,7 +1032,7 @@ func FetchShockStream(url string, token string) (r io.ReadCloser, err error) {
 
 	if res.StatusCode != 200 { //err in fetching data
 		resbody, _ := ioutil.ReadAll(res.Body)
-		err = errors.New(fmt.Sprintf("(FetchShockStream) url=%s, res=%s", url, resbody))
+		err = fmt.Errorf("(FetchShockStream) url=%s, res=%s", url, resbody)
 		return
 	}
 
@@ -976,33 +1040,34 @@ func FetchShockStream(url string, token string) (r io.ReadCloser, err error) {
 	return
 }
 
+// CopyFile _
 // source:  http://stackoverflow.com/a/22259280
 // TODO this is not shock related, need another package
 func CopyFile(src, dst string) (size int64, err error) {
-	var src_file *os.File
-	src_file, err = os.Open(src)
+	var srcFile *os.File
+	srcFile, err = os.Open(src)
 	if err != nil {
 		return
 	}
-	defer src_file.Close()
+	defer srcFile.Close()
 
-	var src_file_stat os.FileInfo
-	src_file_stat, err = src_file.Stat()
+	var srcFileStat os.FileInfo
+	srcFileStat, err = srcFile.Stat()
 	if err != nil {
 		return
 	}
 
-	if !src_file_stat.Mode().IsRegular() {
+	if !srcFileStat.Mode().IsRegular() {
 		err = fmt.Errorf("%s is not a regular file", src)
 		return
 	}
 
-	var dst_file *os.File
-	dst_file, err = os.Create(dst)
+	var dstFile *os.File
+	dstFile, err = os.Create(dst)
 	if err != nil {
 		return
 	}
-	defer dst_file.Close()
-	size, err = io.Copy(dst_file, src_file)
+	defer dstFile.Close()
+	size, err = io.Copy(dstFile, srcFile)
 	return
 }
