@@ -261,6 +261,9 @@ func (sc *ShockClient) createOrUpdate(opts Opts, nodeid string, nodeattr map[str
 					form.AddFile("upload", opts.Value("file"))
 				}
 			}
+			if opts.HasKey("checksum-md5") {
+				form.AddParam("checksum-md5", opts.Value("checksum-md5"))
+			}
 		case "parts":
 			if opts.HasKey("parts") {
 				form.AddParam("parts", opts.Value("parts"))
@@ -535,6 +538,9 @@ func (sc *ShockClient) PutOrPostFile(filename string, nodeid string, rank int, a
 
 // create basic node with file POST
 func (sc *ShockClient) PostFile(filepath string, filename string) (nodeid string, err error) {
+	if sc.Debug {
+		fmt.Fprintf(os.Stdout, "(PostFile) filepath: %s\n", filepath)
+	}
 	opts := Opts{
 		"upload_type": "basic",
 		"file":        filepath,
@@ -551,29 +557,112 @@ func (sc *ShockClient) PostFile(filepath string, filename string) (nodeid string
 	return
 }
 
-// create basic node if file is not in shock already, otherwise returns a new copy node
-func (sc *ShockClient) PostFileMD5(filepath string, filename string) (nodeid string, err error) {
+// PostFileLazy create basic node if file is not in shock already, otherwise returns a existing node
+// createCopyNode boolean, if true, should return a copynode if node exists
+func (sc *ShockClient) PostFileLazy(filepath string, filename string, createCopyNode bool) (nodeid string, err error) {
 
-	var md5sum string
-	md5sum, err = GetMD5FromFile(filepath)
-	if err != nil {
+	if createCopyNode {
+		err = fmt.Errorf("(PostFileLazy) createCopyNode not implemented yet")
 		return
 	}
 
-	opts := Opts{
-		"upload_type":  "basic",
-		"file":         filepath,
-		"checksum-md5": md5sum,
-	}
-	if filename != "" {
-		opts["file_name"] = filename
+	var md5sum string
+
+	md5Filename := filepath + ".md5"
+
+	//var md5FileInfo os.FileInfo
+	_, err = os.Stat(md5Filename)
+	if err != nil {
+		// did not find .md5 file, calculate md5
+
+		if sc.Debug {
+			fmt.Fprintf(os.Stdout, "(PostFileLazy) calculating md5sum... (%s, %s)\n", md5Filename, err.Error())
+		}
+
+		md5sum, err = GetMD5FromFile(filepath)
+		if err != nil {
+			err = fmt.Errorf("(PostFileLazy) GetMD5FromFile returned: %s", err.Error())
+			return
+		}
+
+		if sc.Debug {
+			fmt.Fprintf(os.Stdout, "(PostFileLazy) calculated md5sum: %s\n", md5sum)
+		}
+
+		err = ioutil.WriteFile(md5Filename, []byte(md5sum), 0644)
+		if err != nil {
+			fmt.Fprintf(os.Stdout, "(PostFileLazy) could not write md5sum, ioutil.WriteFile returned: %s, continue anyway", err.Error())
+			err = nil
+		}
+
+	} else {
+		// .md5 file exits
+		var md5sumByteArray []byte
+		md5sumByteArray, err = ioutil.ReadFile(md5Filename) // just pass the file name
+		if err != nil {
+			err = fmt.Errorf("(PostFileLazy) could not read md5sum, ioutil.ReadFile returned: %s", err.Error())
+			return
+		}
+
+		md5sum = string(md5sumByteArray[0:32])
+
+		if sc.Debug {
+			fmt.Fprintf(os.Stdout, "(PostFileLazy) got cached md5sum: %s\n", md5sum)
+		}
 	}
 
-	var node *ShockNode
-	node, err = sc.createOrUpdate(opts, "", nil)
-	if node != nil {
-		nodeid = node.Id
+	var ok bool
+	nodeid, ok, err = sc.GetNodeByMD5(md5sum)
+	if err != nil {
+		fmt.Fprintf(os.Stdout, "(PostFileLazy) GetNodeByMD5 returned: %s", err.Error())
+		err = nil
 	}
+
+	if ok {
+		return
+	}
+
+	nodeid, err = sc.PostFile(filepath, filename)
+	if err != nil {
+		err = fmt.Errorf("(PostFileLazy) sc.PostFile returned: %s", err.Error())
+		return
+	}
+
+	return
+}
+
+// GetNodeByMD5 _
+func (sc *ShockClient) GetNodeByMD5(md5sum string) (nodeid string, ok bool, err error) {
+	var searchQuery url.Values
+	searchQuery = make(url.Values)
+	searchQuery["file.checksum.md5"] = []string{md5sum}
+	searchQuery["type"] = []string{"basic"}
+
+	var sr *ShockQueryResponse
+	sr, err = sc.QueryFull(searchQuery)
+	if err != nil {
+		err = fmt.Errorf("(GetNodeByMD5) sc.QueryFull returned: %s", err.Error())
+		return
+	}
+	if sr.Code != 200 {
+		err = fmt.Errorf("(GetNodeByMD5) sc.QueryFull returned error code %d (%s)", sr.Code, strings.Join(sr.Errs, ","))
+		return
+	}
+
+	if len(sr.Data) > 0 {
+		nodeid = sr.Data[0].Id
+		if sc.Debug {
+			fmt.Fprintf(os.Stdout, "(GetNodeByMD5) found existing node: %s\n", nodeid)
+		}
+		ok = true
+		return
+	}
+	if sc.Debug {
+		fmt.Fprintf(os.Stdout, "(GetNodeByMD5) file not found in Shock\n")
+	}
+
+	ok = false
+
 	return
 }
 
