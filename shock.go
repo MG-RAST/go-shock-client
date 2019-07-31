@@ -570,6 +570,10 @@ func (sc *ShockClient) PostFileLazy(filepath string, filename string, createCopy
 
 	md5Filename := filepath + ".md5"
 
+	if sc.Debug {
+		fmt.Fprintf(os.Stdout, "(PostFileLazy) filepath=%s  (md5Filename=%s)\n", filepath, md5Filename)
+	}
+
 	//var md5FileInfo os.FileInfo
 	_, err = os.Stat(md5Filename)
 	if err != nil {
@@ -585,13 +589,14 @@ func (sc *ShockClient) PostFileLazy(filepath string, filename string, createCopy
 			return
 		}
 
+		baseName := path.Base(filepath)
+		md5sumFileContent := md5sum + " " + baseName
+
 		if sc.Debug {
 			fmt.Fprintf(os.Stdout, "(PostFileLazy) calculated md5sum: %s\n", md5sum)
 		}
 
-		baseName := path.Base(filepath)
-
-		err = ioutil.WriteFile(md5Filename+" "+baseName, []byte(md5sum), 0644)
+		err = ioutil.WriteFile(md5Filename, []byte(md5sumFileContent), 0644)
 		if err != nil {
 			fmt.Fprintf(os.Stdout, "(PostFileLazy) could not write md5sum, ioutil.WriteFile returned: %s, continue anyway", err.Error())
 			err = nil
