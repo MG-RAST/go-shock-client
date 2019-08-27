@@ -1,6 +1,7 @@
 package shock
 
 import (
+	"bytes"
 	"compress/gzip"
 	"crypto/md5"
 	"encoding/json"
@@ -254,6 +255,15 @@ func (sc *ShockClient) createOrUpdate(opts Opts, nodeid string, nodeattr map[str
 	if uploadType != "" {
 		switch uploadType {
 		case "basic":
+
+			// upload string as file
+			if opts.HasKey("file_content") {
+				fileContent := opts.Value("file_content")
+				fileContentLen := int64(len(fileContent))
+				reader := bytes.NewBufferString(fileContent)
+				form.AddFileReader("upload", reader, fileContentLen)
+			}
+
 			if opts.HasKey("file") {
 				if opts.HasKey("compression") {
 					form.AddFile(opts.Value("compression"), opts.Value("file"))
@@ -264,6 +274,7 @@ func (sc *ShockClient) createOrUpdate(opts Opts, nodeid string, nodeattr map[str
 			if opts.HasKey("checksum-md5") {
 				form.AddParam("checksum-md5", opts.Value("checksum-md5"))
 			}
+
 		case "parts":
 			if opts.HasKey("parts") {
 				form.AddParam("parts", opts.Value("parts"))
@@ -536,15 +547,29 @@ func (sc *ShockClient) PutOrPostFile(filename string, nodeid string, rank int, a
 	return
 }
 
-// create basic node with file POST
-func (sc *ShockClient) PostFile(filepath string, filename string) (nodeid string, err error) {
+// PostFile create basic node with file POST
+// use filepath OR fileContent for upload
+func (sc *ShockClient) PostFile(filepath string, fileContent string, filename string) (nodeid string, err error) {
 	if sc.Debug {
 		fmt.Fprintf(os.Stdout, "(PostFile) filepath: %s\n", filepath)
 	}
 	opts := Opts{
 		"upload_type": "basic",
-		"file":        filepath,
 	}
+
+	if filepath != "" && fileContent != "" {
+		err = fmt.Errorf("(PostFile) do use filepath and fileContent arguments at the same time", sc.Host, err)
+		return
+	}
+
+	if filepath != "" {
+		opts["file"] = filepath
+	}
+
+	if fileContent != "" {
+		opts["file_content"] = fileContent
+	}
+
 	if filename != "" {
 		opts["file_name"] = filename
 	}
@@ -629,7 +654,7 @@ func (sc *ShockClient) PostFileLazy(filepath string, filename string, createCopy
 		return
 	}
 
-	nodeid, err = sc.PostFile(filepath, filename)
+	nodeid, err = sc.PostFile(filepath, "", filename)
 	if err != nil {
 		err = fmt.Errorf("(PostFileLazy) sc.PostFile returned: %s", err.Error())
 		return
