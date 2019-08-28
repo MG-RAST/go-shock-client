@@ -576,6 +576,9 @@ func (sc *ShockClient) PostFile(filepath string, fileContent string, filename st
 
 	var node *ShockNode
 	node, err = sc.createOrUpdate(opts, "", nil)
+	if err != nil {
+		return
+	}
 	if node != nil {
 		nodeid = node.Id
 	}
@@ -584,7 +587,7 @@ func (sc *ShockClient) PostFile(filepath string, fileContent string, filename st
 
 // PostFileLazy create basic node if file is not in shock already, otherwise returns a existing node
 // createCopyNode boolean, if true, should return a copynode if node exists
-func (sc *ShockClient) PostFileLazy(filepath string, filename string, createCopyNode bool) (nodeid string, err error) {
+func (sc *ShockClient) PostFileLazy(filepath string, filename string, fileContent string, createCopyNode bool) (nodeid string, err error) {
 
 	if createCopyNode {
 		err = fmt.Errorf("(PostFileLazy) createCopyNode not implemented yet")
@@ -592,69 +595,69 @@ func (sc *ShockClient) PostFileLazy(filepath string, filename string, createCopy
 	}
 
 	var md5sum string
-
-	md5Filename := filepath + ".md5"
-
-	if sc.Debug {
-		fmt.Fprintf(os.Stdout, "(PostFileLazy) filepath=%s  (md5Filename=%s)\n", filepath, md5Filename)
-	}
-
-	//var md5FileInfo os.FileInfo
-	_, err = os.Stat(md5Filename)
-	if err != nil {
-		// did not find .md5 file, calculate md5
+	if filepath != "" {
+		md5Filename := filepath + ".md5"
 
 		if sc.Debug {
-			fmt.Fprintf(os.Stdout, "(PostFileLazy) calculating md5sum... (%s, %s)\n", md5Filename, err.Error())
+			fmt.Fprintf(os.Stdout, "(PostFileLazy) filepath=%s  (md5Filename=%s)\n", filepath, md5Filename)
 		}
 
-		md5sum, err = GetMD5FromFile(filepath)
+		//var md5FileInfo os.FileInfo
+		_, err = os.Stat(md5Filename)
 		if err != nil {
-			err = fmt.Errorf("(PostFileLazy) GetMD5FromFile returned: %s", err.Error())
-			return
+			// did not find .md5 file, calculate md5
+
+			if sc.Debug {
+				fmt.Fprintf(os.Stdout, "(PostFileLazy) calculating md5sum... (%s, %s)\n", md5Filename, err.Error())
+			}
+
+			md5sum, err = GetMD5FromFile(filepath)
+			if err != nil {
+				err = fmt.Errorf("(PostFileLazy) GetMD5FromFile returned: %s", err.Error())
+				return
+			}
+
+			baseName := path.Base(filepath)
+			md5sumFileContent := md5sum + " " + baseName
+
+			if sc.Debug {
+				fmt.Fprintf(os.Stdout, "(PostFileLazy) calculated md5sum: %s\n", md5sum)
+			}
+
+			err = ioutil.WriteFile(md5Filename, []byte(md5sumFileContent), 0644)
+			if err != nil {
+				fmt.Fprintf(os.Stdout, "(PostFileLazy) could not write md5sum, ioutil.WriteFile returned: %s, continue anyway", err.Error())
+				err = nil
+			}
+
+		} else {
+			// .md5 file exits
+			var md5sumByteArray []byte
+			md5sumByteArray, err = ioutil.ReadFile(md5Filename) // just pass the file name
+			if err != nil {
+				err = fmt.Errorf("(PostFileLazy) could not read md5sum, ioutil.ReadFile returned: %s", err.Error())
+				return
+			}
+
+			md5sum = string(md5sumByteArray[0:32])
+
+			if sc.Debug {
+				fmt.Fprintf(os.Stdout, "(PostFileLazy) got cached md5sum: %s\n", md5sum)
+			}
 		}
 
-		baseName := path.Base(filepath)
-		md5sumFileContent := md5sum + " " + baseName
-
-		if sc.Debug {
-			fmt.Fprintf(os.Stdout, "(PostFileLazy) calculated md5sum: %s\n", md5sum)
-		}
-
-		err = ioutil.WriteFile(md5Filename, []byte(md5sumFileContent), 0644)
+		var ok bool
+		nodeid, ok, err = sc.GetNodeByMD5(md5sum)
 		if err != nil {
-			fmt.Fprintf(os.Stdout, "(PostFileLazy) could not write md5sum, ioutil.WriteFile returned: %s, continue anyway", err.Error())
+			fmt.Fprintf(os.Stdout, "(PostFileLazy) GetNodeByMD5 returned: %s", err.Error())
 			err = nil
 		}
 
-	} else {
-		// .md5 file exits
-		var md5sumByteArray []byte
-		md5sumByteArray, err = ioutil.ReadFile(md5Filename) // just pass the file name
-		if err != nil {
-			err = fmt.Errorf("(PostFileLazy) could not read md5sum, ioutil.ReadFile returned: %s", err.Error())
+		if ok {
 			return
 		}
-
-		md5sum = string(md5sumByteArray[0:32])
-
-		if sc.Debug {
-			fmt.Fprintf(os.Stdout, "(PostFileLazy) got cached md5sum: %s\n", md5sum)
-		}
 	}
-
-	var ok bool
-	nodeid, ok, err = sc.GetNodeByMD5(md5sum)
-	if err != nil {
-		fmt.Fprintf(os.Stdout, "(PostFileLazy) GetNodeByMD5 returned: %s", err.Error())
-		err = nil
-	}
-
-	if ok {
-		return
-	}
-
-	nodeid, err = sc.PostFile(filepath, "", filename)
+	nodeid, err = sc.PostFile(filepath, fileContent, filename)
 	if err != nil {
 		err = fmt.Errorf("(PostFileLazy) sc.PostFile returned: %s", err.Error())
 		return
